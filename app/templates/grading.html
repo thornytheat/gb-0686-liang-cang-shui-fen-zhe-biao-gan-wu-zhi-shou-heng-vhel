@@ -1,0 +1,92 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>定等应付 · 谷衡</title>
+<link rel="stylesheet" href="/static/theme.css"><link rel="stylesheet" href="/static/layout.css"><link rel="stylesheet" href="/static/components.css">
+<style>
+.tag{display:inline-block;padding:2px 8px;font-size:11px;border:1px solid var(--line-strong)}
+.tag.ok{color:var(--ok);border-color:var(--ok)}.tag.bad{color:var(--bad);border-color:var(--bad)}.tag.wait{color:var(--accent);border-color:var(--accent)}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--gap);align-items:start}
+.forms{display:grid;grid-template-columns:1fr 1fr;gap:var(--gap)}
+.mini{font:11px var(--font-num);color:var(--ink-muted)}
+.point-row{display:grid;grid-template-columns:1fr 1fr auto;gap:6px;margin-bottom:6px}
+.point-row button{width:auto;padding:4px 10px}
+.hashline{font:10px var(--font-num);color:var(--ink-muted);overflow-wrap:anywhere}
+section.panel{margin-bottom:var(--gap)}
+.verdict-line{padding:10px var(--pad);border-bottom:1px dashed var(--line);font-size:12px}
+.verdict-line b{font-family:var(--font-num)}
+</style>
+</head>
+<body><div class="app"><aside class="rail">
+<a class="brand" href="/grading">谷衡<span>GRAIN / 02</span></a>
+<div class="edition">定等应付簿<br>2026 秋收季</div>
+<nav><a href="/m/1"><span>01-07</span>折标结算流水线</a><a href="/grading" class="on"><span>08</span>定等应付</a></nav>
+<div class="rail-foot">单车一结论<br>应付锁单 · 混仓重算</div>
+</aside>
+<div class="work"><header class="topbar"><h1>定等应付</h1><span class="batch">按水分杂质定等 · 同结论计价</span>
+<button class="btn" id="refresh">刷新</button><button class="btn" id="print">打印</button></header>
+<main class="content">
+<div class="kpis"><div class="kpi"><small>在仓车数</small><b id="kpi-trucks">–</b><i>车</i></div>
+<div class="kpi"><small>锁单应付</small><b id="kpi-pay">–</b><i>CNY</i></div>
+<div class="kpi"><small>待复验</small><b id="kpi-pending">–</b><i>车</i></div>
+<div class="kpi"><small>仓批</small><b id="kpi-bins">–</b><i>仓</i></div>
+<div class="kpi"><small>事件</small><b id="kpi-events">–</b><i>条</i></div></div>
+
+<div class="forms">
+<section class="panel"><div class="panel__head"><h2>① 开契约定等级带</h2><sup>口径开秤前选定</sup></div>
+<form id="contract-form" style="padding:var(--pad)">
+<div class="form-grid">
+<label>合同编号<input name="contract_id" value="HT-2026-001"></label>
+<label>粮种（单一粮种）<input name="grain" value="小麦"></label>
+<label>标准水分 %<input name="standard_moisture" value="12.5" inputmode="decimal"></label>
+<label>定等口径<select name="basis"><option value="worst_point">最差点（仓里口径）</option><option value="composite">整车综合（农户口径）</option></select></label>
+<label>水分退收上限 %<input name="max_moisture" value="18" inputmode="decimal"></label>
+<label>杂质退收上限 %<input name="max_impurity" value="6" inputmode="decimal"></label>
+</div>
+<label style="margin-top:10px">等级带（由严到宽：等级, 水分≤, 杂质≤, 单价CNY/kg，每行一条）
+<textarea name="bands_text" style="height:110px">一等,13.5,1.0,2.80
+二等,15.0,2.0,2.60
+三等,16.5,4.0,2.40</textarea></label>
+<button class="btn primary">登记合同</button></form></section>
+
+<section class="panel"><div class="panel__head"><h2>② 登记仓批</h2><sup>余量随混仓变化</sup></div>
+<form id="bin-form" style="padding:var(--pad)">
+<div class="form-grid">
+<label>仓号<input name="bin_id" value="仓A"></label>
+<label>粮种<input name="grain" value="小麦"></label>
+<label>容量 kg（可空）<input name="capacity_kg" value="60000" inputmode="decimal"></label>
+</div><button class="btn primary">登记仓</button></form>
+<div class="panel__head" style="border-top:1px solid var(--line)"><h2>③ 到车化验</h2><sup>同化验重试幂等</sup></div>
+<form id="arrive-form" style="padding:var(--pad)">
+<div class="form-grid">
+<label>合同编号<input name="contract_id" value="HT-2026-001"></label>
+<label>车号<input name="truck_id" value="C001"></label>
+<label>仓号<input name="bin_id" value="仓A"></label>
+<label>净重 kg<input name="net_kg" value="1000" inputmode="decimal"></label>
+</div>
+<label>抽样点（水分%, 杂质%）</label>
+<div id="points"></div>
+<button type="button" class="btn" id="add-point" style="margin-bottom:10px">加抽样点</button>
+<button class="btn primary">提交化验并出结论</button></form></section>
+</div>
+
+<section class="panel"><div class="panel__head"><h2>④ 待复验车次与复检</h2><span id="pending-count"></span></div>
+<div id="pending-box" class="table-wrap"></div></section>
+
+<div class="grid2">
+<section class="panel"><div class="panel__head"><h2>本批逐车结论</h2><span>等级/折标/应付同一结论号</span></div>
+<div class="table-wrap"><table class="ledger" id="truck-table"><thead><tr>
+<th>车号</th><th>仓</th><th>版本/状态</th><th>采信水%</th><th>采信杂%</th><th>等级</th><th class="num">净重</th><th class="num">折标kg</th><th class="num">应付</th><th>结论号/依据</th>
+</tr></thead><tbody></tbody></table></div></section>
+
+<section class="panel"><div class="panel__head"><h2>仓批等级与余量</h2><span>混仓重算 · 失效留痕</span></div>
+<div id="bin-box" class="table-wrap"></div></section>
+</div>
+
+<section class="panel"><div class="panel__head"><h2>事件流水（锁单/失效/复验/幂等均可复核）</h2><span id="event-count"></span></div>
+<div class="table-wrap"><table class="ledger" id="event-table"><thead><tr>
+<th>#</th><th>事件</th><th>车</th><th>仓</th><th>内容</th><th>时间 UTC</th>
+</tr></thead><tbody></tbody></table></div></section>
+
+<div id="feedback" role="status" aria-live="polite"></div>
+</main><footer class="statusbar"><span>不含跨粮种混仓 · 税费 · 付款</span><span>已开应付锁单，新化验只走红冲</span><span id="foot-ts"></span></footer>
+</div></div>
+<script src="/static/grading.js" defer></script></body></html>
